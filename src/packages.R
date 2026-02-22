@@ -3,7 +3,7 @@
 # Source this file at the top of any script that needs these dependencies.
 # Missing packages are installed automatically from CRAN.
 
-required_pkgs <- c("tidyverse", "scales", "patchwork")
+required_pkgs <- c("tidyverse", "scales", "patchwork", "glmnet", "ranger")
 
 missing_pkgs <- required_pkgs[!sapply(required_pkgs, requireNamespace, quietly = TRUE)]
 if (length(missing_pkgs) > 0) {
@@ -15,4 +15,6 @@ suppressPackageStartupMessages({
   library(tidyverse)   # dplyr, ggplot2, readr, tidyr, stringr, forcats
   library(scales)      # axis and label formatting helpers
   library(patchwork)   # composing multi-panel ggplots
+  library(glmnet)      # ridge, lasso, elastic net with CV
+  library(ranger)      # fast random forest
 })
