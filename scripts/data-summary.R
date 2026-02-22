@@ -4,7 +4,7 @@
 # Run from project root: Rscript scripts/data-summary.R
 #
 # Outputs:
-#   output/assessment/summary_statistics.csv   — summary statistics table
+#   output/summary/summary_statistics.csv      — summary statistics table
 #   output/figures/data-summary/
 #     target_distribution.png                  — raw vs log(1+shares)
 #     continuous_features_batch01.png, ...     — histograms for numeric features
@@ -24,9 +24,10 @@ source(file.path(root, "src", "plot_theme.R"))
 
 # ── 0. Output paths ────────────────────────────────────────────────────────────
 
-fig_dir    <- file.path(root, "output", "figures", "data-summary")
-assess_dir <- file.path(root, "output", "assessment")
+fig_dir     <- file.path(root, "output", "figures", "data-summary")
+summary_dir <- file.path(root, "output", "summary")
 dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(summary_dir, recursive = TRUE, showWarnings = FALSE)
 
 
 # ── 1. Load data ───────────────────────────────────────────────────────────────
@@ -57,8 +58,8 @@ summary_tbl <- df %>%
   )
 
 print(summary_tbl)
-write_csv(summary_tbl, file.path(assess_dir, "summary_statistics.csv"))
-message("✓ Summary statistics → ", file.path(assess_dir, "summary_statistics.csv"))
+write_csv(summary_tbl, file.path(summary_dir, "summary_statistics.csv"))
+message("✓ Summary statistics → ", file.path(summary_dir, "summary_statistics.csv"))
 
 
 # ── 3. Classify variables ──────────────────────────────────────────────────────
@@ -173,5 +174,5 @@ message("✓ binary_features.png saved")
 
 message(sprintf(
   "\n── data-summary.R complete ──\nFigures  → %s\nStats    → %s\n",
-  fig_dir, file.path(assess_dir, "summary_statistics.csv")
+  fig_dir, file.path(summary_dir, "summary_statistics.csv")
 ))
