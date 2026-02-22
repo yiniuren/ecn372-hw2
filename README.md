@@ -23,6 +23,7 @@ ecn372-hw2/
 │
 ├── output/
 │   ├── assessment/        # Model assessment outputs 
+│   ├── summary/           # Summary statistics (e.g. data-summary CSV)
 │   └── figures/           # Figures 
 │
 └── Makefile
@@ -33,6 +34,7 @@ ecn372-hw2/
 - **`src/`** — Reusable code (training pipeline, prediction, preprocessing) used by the main workflow.
 - **`scripts/`** — One-off or exploratory scripts (e.g. EDA, experiments) that are not the main entry point for evaluation.
 - **`output/assessment/`** — Saved model assessment results (e.g. cross-validation scores, test metrics).
+- **`output/summary/`** — Summary statistics tables (e.g. from data-summary.R).
 - **`output/figures/`** — Saved plots and figures.
 
 The **Makefile** (with an `evaluate` target) will be added once the main code is in place.
