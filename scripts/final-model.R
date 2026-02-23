@@ -16,6 +16,7 @@ if (basename(root) == "scripts" && dir.exists(file.path(root, "..", "data"))) {
 }
 
 source(file.path(root, "src", "packages.R"))
+source(file.path(root, "src", "scale_predictors.R"))
 
 
 # ── 1. Determine best model ───────────────────────────────────────────────────
@@ -38,13 +39,17 @@ y_log <- log1p(df$shares)
 X     <- as.matrix(select(df, -shares))
 feature_names <- colnames(X)
 
+# Standardize predictors (same as in CV)
+scale_params <- get_scale_params(X)
+X_s <- scale_predictors(X, scale_params)
+
 
 # ── 3. Train on full data ─────────────────────────────────────────────────────
 
-if (best_model %in% c("ridge", "lasso", "enet")) {
-  alpha_val <- switch(best_model, ridge = 0, lasso = 1, enet = 0.5)
+if (best_model %in% c("ridge", "lasso")) {
+  alpha_val <- switch(best_model, ridge = 0, lasso = 1)
 
-  cv_fit  <- cv.glmnet(X, y_log, alpha = alpha_val, nfolds = 10)
+  cv_fit  <- cv.glmnet(X_s, y_log, alpha = alpha_val, nfolds = 10, nlambda = 1000, standardize = FALSE)
   model_obj <- cv_fit
   lambda    <- cv_fit$lambda.min
 
@@ -52,15 +57,8 @@ if (best_model %in% c("ridge", "lasso", "enet")) {
   cat(sprintf("Trained %s on full data: lambda.min = %.5f, non-zero coefs = %d / %d\n",
               best$label[1], lambda, n_nonzero, length(feature_names)))
 
-} else if (best_model == "rf") {
-  model_obj <- ranger(y ~ ., data = data.frame(y = y_log, X),
-                      num.trees = 500, seed = 372)
-  lambda <- NA_real_
-  cat(sprintf("Trained Random Forest on full data: %d trees, OOB R² = %.4f\n",
-              model_obj$num.trees, model_obj$r.squared))
-
 } else if (best_model == "ols") {
-  model_obj <- lm(y ~ ., data = data.frame(y = y_log, X))
+  model_obj <- lm(y ~ ., data = data.frame(y = y_log, X_s))
   lambda <- NA_real_
   cat(sprintf("Trained OLS on full data: %d coefficients\n",
               length(coef(model_obj))))
@@ -74,7 +72,9 @@ model_info <- list(
   label         = best$label[1],
   model         = model_obj,
   lambda        = lambda,
-  feature_names = feature_names
+  feature_names = feature_names,
+  scale_center  = scale_params$center,
+  scale_scale   = scale_params$scale
 )
 
 out_path <- file.path(root, "output", "final_model.rds")

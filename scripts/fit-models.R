@@ -1,6 +1,6 @@
 # scripts/fit-models.R
 # Compare models via nested 10-fold CV on log(1 + shares).
-# MSE is computed on the original (back-transformed) shares scale.
+# Metrics (MSE, RMSE, R²) are computed on the log scale.
 #
 # Run from project root: Rscript scripts/fit-models.R
 #
@@ -19,6 +19,7 @@ if (basename(root) == "scripts" && dir.exists(file.path(root, "..", "data"))) {
 
 source(file.path(root, "src", "packages.R"))
 source(file.path(root, "src", "plot_theme.R"))
+source(file.path(root, "src", "scale_predictors.R"))
 
 assess_dir <- file.path(root, "output", "assessment")
 fig_dir    <- file.path(root, "output", "figures")
@@ -49,11 +50,11 @@ foldid <- sample(rep(1:K, length.out = n))
 
 # ── 3. Nested CV loop ─────────────────────────────────────────────────────────
 # Outer loop: K folds for honest MSE estimation.
-# Inner loop (for Ridge/LASSO/ENet): cv.glmnet selects lambda within each
-#   outer training set (5-fold inner CV).
+# Inner loop (for Ridge/LASSO): cv.glmnet selects lambda within each
+#   outer training set (10-fold inner CV).
 
-cv_preds <- matrix(NA_real_, nrow = n, ncol = 5,
-                   dimnames = list(NULL, c("ols", "ridge", "lasso", "enet", "rf")))
+cv_preds <- matrix(NA_real_, nrow = n, ncol = 3,
+                   dimnames = list(NULL, c("ols", "ridge", "lasso")))
 
 for (k in 1:K) {
   cat(sprintf("── Outer fold %d / %d ──\n", k, K))
@@ -63,69 +64,79 @@ for (k in 1:K) {
   X_tr <- X[tr, ];  X_te <- X[te, ]
   y_tr <- y_log[tr]
 
-  # OLS
-  ols_df  <- data.frame(y = y_tr, X_tr)
+  # Standardize using training fold only (no test leakage)
+  scale_params <- get_scale_params(X_tr)
+  X_tr_s <- scale_predictors(X_tr, scale_params)
+  X_te_s <- scale_predictors(X_te, scale_params)
+
+  # OLS (standardized predictors; same predictions as unstandardized)
+  ols_df  <- data.frame(y = y_tr, X_tr_s)
   ols_fit <- lm(y ~ ., data = ols_df)
-  cv_preds[te, "ols"] <- predict(ols_fit, newdata = data.frame(X_te))
+  cv_preds[te, "ols"] <- predict(ols_fit, newdata = data.frame(X_te_s))
 
-  # Ridge  (alpha = 0)
-  ridge_cv <- cv.glmnet(X_tr, y_tr, alpha = 0, nfolds = 5)
+  # Ridge  (alpha = 0) — standardize = FALSE since we pre-standardized; fine lambda grid
+  ridge_cv <- cv.glmnet(X_tr_s, y_tr, alpha = 0, nfolds = 10, nlambda = 1000, standardize = FALSE)
   cv_preds[te, "ridge"] <- as.numeric(
-    predict(ridge_cv, newx = X_te, s = "lambda.min"))
+    predict(ridge_cv, newx = X_te_s, s = "lambda.min"))
 
-  # LASSO  (alpha = 1)
-  lasso_cv <- cv.glmnet(X_tr, y_tr, alpha = 1, nfolds = 5)
+  # LASSO  (alpha = 1); fine lambda grid
+  lasso_cv <- cv.glmnet(X_tr_s, y_tr, alpha = 1, nfolds = 10, nlambda = 1000, standardize = FALSE)
   cv_preds[te, "lasso"] <- as.numeric(
-    predict(lasso_cv, newx = X_te, s = "lambda.min"))
-
-  # Elastic Net (alpha = 0.5)
-  enet_cv <- cv.glmnet(X_tr, y_tr, alpha = 0.5, nfolds = 5)
-  cv_preds[te, "enet"] <- as.numeric(
-    predict(enet_cv, newx = X_te, s = "lambda.min"))
-
-  # Random Forest
-  rf_fit <- ranger(y ~ ., data = data.frame(y = y_tr, X_tr),
-                   num.trees = 500, seed = 372)
-  cv_preds[te, "rf"] <- predict(rf_fit, data = data.frame(X_te))$predictions
+    predict(lasso_cv, newx = X_te_s, s = "lambda.min"))
 }
 
 
-# ── 4. Compute original-scale MSE ─────────────────────────────────────────────
+# ── 4. Compute log-scale metrics (MSE, RMSE, R²) ─────────────────────────────
 
 model_names <- colnames(cv_preds)
-model_labels <- c(ols = "OLS", ridge = "Ridge", lasso = "LASSO",
-                  enet = "Elastic Net", rf = "Random Forest")
+model_labels <- c(ols = "OLS", ridge = "Ridge", lasso = "LASSO")
+
+ss_tot <- sum((y_log - mean(y_log))^2)
 
 results <- tibble(
   model = model_names,
   label = model_labels[model_names],
-  mse   = map_dbl(model_names, ~ mean((y_raw - expm1(cv_preds[, .x]))^2))
+  mse   = map_dbl(model_names, ~ mean((y_log - cv_preds[, .x])^2)),
+  rmse  = map_dbl(model_names, ~ sqrt(mean((y_log - cv_preds[, .x])^2))),
+  r2    = map_dbl(model_names, ~ 1 - sum((y_log - cv_preds[, .x])^2) / ss_tot),
+  mae   = map_dbl(model_names, ~ mean(abs(y_log - cv_preds[, .x])))
 ) %>%
   arrange(mse)
 
-cat("\n── Model comparison (10-fold nested CV, original-scale MSE) ──\n")
+cat("\n── Model comparison (10-fold nested CV, log-scale metrics) ──\n")
 print(results)
 
 write_csv(results, file.path(assess_dir, "model_comparison.csv"))
 message("✓ Model comparison → ", file.path(assess_dir, "model_comparison.csv"))
 
 
-# ── 5. Model comparison bar plot ───────────────────────────────────────────────
+# ── 5. Model comparison plot (all three metrics) ──────────────────────────────
 
-p_comp <- results %>%
-  mutate(label = fct_reorder(label, mse)) %>%
-  ggplot(aes(x = label, y = mse)) +
-  geom_col(fill = "#4E79A7", width = 0.6) +
-  geom_text(aes(label = format(round(mse), big.mark = ",")),
-            vjust = -0.4, size = 3.5) +
-  scale_y_continuous(labels = label_comma(), expand = expansion(mult = c(0, 0.12))) +
+results_long <- results %>%
+  pivot_longer(cols = c(mse, rmse, r2, mae), names_to = "metric", values_to = "value") %>%
+  mutate(
+    metric = factor(metric, levels = c("mse", "rmse", "r2", "mae"),
+                    labels = c("MSE", "RMSE", "R²", "MAE")),
+    label  = fct_reorder(label, value, .fun = min)
+  )
+
+p_comp <- results_long %>%
+  ggplot(aes(x = label, y = value, fill = metric)) +
+  geom_col(position = position_dodge(width = 0.7), width = 0.6) +
+  geom_text(aes(label = round(value, 4)),
+            position = position_dodge(width = 0.7),
+            vjust = -0.4, size = 2.8) +
+  facet_wrap(~ metric, scales = "free_y", nrow = 1) +
+  scale_fill_manual(values = c("MSE" = "#4E79A7", "RMSE" = "#F28E2B", "R²" = "#59A14F", "MAE" = "#E15759")) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
   labs(title = "Model comparison: 10-fold nested CV",
-       subtitle = "MSE on original shares scale (lower is better)",
-       x = NULL, y = "MSE") +
-  theme_hw()
+       subtitle = "Metrics on log(1 + shares) scale",
+       x = NULL, y = NULL) +
+  theme_hw() +
+  theme(legend.position = "none")
 
 ggsave(file.path(fig_dir, "model_comparison.png"), p_comp,
-       width = 8, height = 5, dpi = 150)
+       width = 18, height = 5, dpi = 150)
 message("✓ model_comparison.png saved")
 
 
@@ -133,7 +144,9 @@ message("✓ model_comparison.png saved")
 # Fit LASSO on all training data to get the coefficient path and
 # the selected variables at lambda.min / lambda.1se.
 
-lasso_full <- cv.glmnet(X, y_log, alpha = 1, nfolds = 10)
+scale_params_full <- get_scale_params(X)
+X_s <- scale_predictors(X, scale_params_full)
+lasso_full <- cv.glmnet(X_s, y_log, alpha = 1, nfolds = 10, nlambda = 1000, standardize = FALSE)
 
 # Path plot
 png(file.path(fig_dir, "lasso_path.png"), width = 900, height = 500, res = 120)
@@ -177,6 +190,6 @@ lasso_coefs %>%
   print()
 
 message(sprintf(
-  "\n── fit-models.R complete ──\nBest model: %s (MSE = %s)\n",
-  results$label[1], format(round(results$mse[1]), big.mark = ",")
+  "\n── fit-models.R complete ──\nBest model: %s (log-scale MSE = %.4f, R² = %.4f)\n",
+  results$label[1], results$mse[1], results$r2[1]
 ))

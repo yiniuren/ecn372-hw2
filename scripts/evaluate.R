@@ -48,24 +48,23 @@ test_df <- preprocess(test_raw)
 y_true  <- test_df$shares
 X_test  <- as.matrix(select(test_df, all_of(model_info$feature_names)))
 
+# Standardize test predictors using training center/scale
+X_test_s <- scale(X_test, center = model_info$scale_center, scale = model_info$scale_scale)
 
-# ── 4. Predict ─────────────────────────────────────────────────────────────────
 
-if (model_info$type %in% c("ridge", "lasso", "enet")) {
+# ── 4. Predict (on log scale) ──────────────────────────────────────────────────
+
+if (model_info$type %in% c("ridge", "lasso")) {
   preds_log <- as.numeric(
-    predict(model_info$model, newx = X_test, s = model_info$lambda))
-
-} else if (model_info$type == "rf") {
-  preds_log <- predict(model_info$model, data = as.data.frame(X_test))$predictions
+    predict(model_info$model, newx = X_test_s, s = model_info$lambda))
 
 } else if (model_info$type == "ols") {
-  preds_log <- predict(model_info$model, newdata = as.data.frame(X_test))
+  preds_log <- predict(model_info$model, newdata = as.data.frame(X_test_s))
 }
 
-preds <- expm1(preds_log)
 
+# ── 5. Compute and print MSE on log(1 + shares) scale ─────────────────────────
 
-# ── 5. Compute and print MSE ──────────────────────────────────────────────────
-
-mse <- mean((y_true - preds)^2)
+y_log <- log1p(y_true)
+mse <- mean((y_log - preds_log)^2)
 cat(sprintf("MSE: %.2f\n", mse))
