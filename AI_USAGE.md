@@ -44,6 +44,4 @@ This file documents how AI tools (e.g. Cursor) were used in this project.
 
 ---
 
-## Extent
 
-AI was used for scaffolding, code generation, and documentation. The student directed the overall strategy (which models, which features to transform, interaction term choices) and will review, run, and interpret the outputs. Variable selection and final model choice are driven by the data (LASSO + nested CV), not hard-coded by AI.
